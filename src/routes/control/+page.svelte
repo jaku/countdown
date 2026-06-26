@@ -34,7 +34,7 @@
 	let interval: ReturnType<typeof setInterval> | undefined;
 	let clearWarningOpen = false;
 
-	const overlayUrl = `${$page.url.origin}/subathon`;
+	$: overlayUrl = new URL('overlay.html', $page.url).href;
 
 	function teardownSession() {
 		unsub?.();

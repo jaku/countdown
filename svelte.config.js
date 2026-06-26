@@ -12,7 +12,7 @@ const config = {
 			strict: false
 		}),
 		prerender: {
-			entries: ['/subathon', '/subathon/control']
+			entries: ['/overlay', '/control']
 		}
 	}
 };

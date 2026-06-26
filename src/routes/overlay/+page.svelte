@@ -3,6 +3,7 @@
 	import { page } from '$app/stores';
 	import SubathonOverlayDisplay from '$lib/SubathonOverlayDisplay.svelte';
 	import FloatingTimeGains from '$lib/FloatingTimeGains.svelte';
+	import { connectCrowdControlPubSub } from '$lib/crowdcontrol';
 	import { parseSubathonOverrides } from '$lib/subathon-url';
 	import {
 		addCcPaidUnits,
@@ -23,9 +24,8 @@
 	const urlOverrides = parseSubathonOverrides($page.url.searchParams);
 	const urlKey = $page.url.searchParams.get('key');
 
-	const wssUrl = 'wss://pubsub.crowdcontrol.live/';
 	let key: string | null = null;
-	let wss: WebSocket | undefined;
+	let disconnectSocket: (() => void) | undefined;
 	let tick = 0;
 	let remaining = 0;
 
@@ -41,14 +41,8 @@
 		if (interval) clearInterval(interval);
 		interval = undefined;
 
-		if (wss) {
-			wss.removeEventListener('open', onOpen);
-			wss.removeEventListener('message', onMessage);
-			wss.removeEventListener('close', onClose);
-			wss.removeEventListener('error', onClose);
-			wss.close();
-			wss = undefined;
-		}
+		disconnectSocket?.();
+		disconnectSocket = undefined;
 	}
 
 	function persist(next: SubathonState) {
@@ -62,49 +56,32 @@
 		state = saved;
 	}
 
-	function onOpen() {
-		if (!wss || !key) return;
+	function onPubSubMessage(message: unknown) {
+		const msg = message as {
+			domain?: string;
+			type?: string;
+			payload?: { amount?: number; payments?: { global: { paid: number }; local: { paid: number } } };
+		};
+		if (msg.domain !== 'prv') return;
 
-		wss.send(
-			JSON.stringify({
-				action: 'subscribe',
-				data: JSON.stringify({
-					key,
-					topics: ['prv/self', 'pub/self', 'overlay/self']
-				})
-			})
-		);
-	}
-
-	function onMessage(event: MessageEvent) {
-		const { data } = event;
-		if (typeof data !== 'string') return;
-		if (data === 'pong') return;
-
-		const message = JSON.parse(data);
-		if (message.domain !== 'prv') return;
-
-		if (message.type === 'coin-exchange' && state.coins.bitsExchange) {
-			const added = bitsExchangeToSeconds(message.payload.amount, state);
+		if (msg.type === 'coin-exchange' && state.coins.bitsExchange) {
+			const added = bitsExchangeToSeconds(msg.payload?.amount ?? 0, state);
 			if (added > 0) persist(addCoinGain(state, added));
-		} else if (message.type === 'effect-success' && message.payload.payments) {
-			const paid = effectPaidUnits(message.payload.payments, state.coins);
+		} else if (msg.type === 'effect-success' && msg.payload?.payments) {
+			const paid = effectPaidUnits(msg.payload.payments, state.coins);
 			if (paid > 0) persist(addCcPaidUnits(state, paid));
 		}
 	}
 
-	function onClose() {
-		wss = undefined;
-	}
-
 	function connectSocket() {
-		if (!key || wss) return;
+		if (!key) return;
 
-		wss = new WebSocket(wssUrl);
-		wss.addEventListener('open', onOpen);
-		wss.addEventListener('message', onMessage);
-		wss.addEventListener('close', onClose);
-		wss.addEventListener('error', onClose);
+		disconnectSocket?.();
+		disconnectSocket = connectCrowdControlPubSub({
+			key,
+			topics: ['prv/self', 'pub/self', 'overlay/self'],
+			onMessage: onPubSubMessage
+		});
 	}
 
 	function startSession(activeKey: string) {
