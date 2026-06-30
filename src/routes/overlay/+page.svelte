@@ -6,14 +6,17 @@
 	import { connectCrowdControlPubSub } from '$lib/crowdcontrol';
 	import { parseSubathonOverrides } from '$lib/subathon-url';
 	import {
-		addCcPaidUnits,
 		addCoinGain,
+		addPaidCoins,
 		bitsExchangeToSeconds,
+		commitState,
 		createInitialState,
-		effectPaidUnits,
+		effectDisplayName,
+		effectPaidCoins,
 		getRemaining,
 		initOrLoadState,
 		loadControlKey,
+		logEffectSuccess,
 		saveState,
 		statesEqual,
 		subscribeControlKey,
@@ -45,10 +48,9 @@
 		disconnectSocket = undefined;
 	}
 
-	function persist(next: SubathonState) {
+	function persist(update: (base: SubathonState) => SubathonState) {
 		if (!key) return;
-		state = next;
-		saveState(key, next);
+		state = commitState(key, state, update);
 	}
 
 	function onExternalUpdate(saved: SubathonState | null) {
@@ -60,16 +62,35 @@
 		const msg = message as {
 			domain?: string;
 			type?: string;
-			payload?: { amount?: number; payments?: { global: { paid: number }; local: { paid: number } } };
+			payload?: {
+				amount?: number;
+				effect?: { name?: string | { public?: string; sort?: string } };
+				payments?: {
+					global: { free: number; paid: number };
+					local: { free: number; paid: number };
+				};
+			};
 		};
 		if (msg.domain !== 'prv') return;
 
-		if (msg.type === 'coin-exchange' && state.coins.bitsExchange) {
-			const added = bitsExchangeToSeconds(msg.payload?.amount ?? 0, state);
-			if (added > 0) persist(addCoinGain(state, added));
+		if (msg.type === 'coin-exchange') {
+			persist((prev) => {
+				if (!prev.coins.bitsExchange) return prev;
+				const added = bitsExchangeToSeconds(msg.payload?.amount ?? 0, prev);
+				if (added <= 0) return prev;
+				return addCoinGain(prev, added);
+			});
 		} else if (msg.type === 'effect-success' && msg.payload?.payments) {
-			const paid = effectPaidUnits(msg.payload.payments, state.coins);
-			if (paid > 0) persist(addCcPaidUnits(state, paid));
+			const payments = msg.payload.payments;
+			const effectName = effectDisplayName(msg.payload.effect);
+
+			persist((prev) => {
+				logEffectSuccess(effectName, payments, prev.coins, prev.secondsPerCoin);
+
+				const paid = effectPaidCoins(payments, prev.coins);
+				if (paid <= 0) return prev;
+				return addPaidCoins(prev, paid);
+			});
 		}
 	}
 

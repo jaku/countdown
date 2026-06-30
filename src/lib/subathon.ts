@@ -99,6 +99,18 @@ export function saveState(key: string, state: SubathonState): void {
 	}
 }
 
+/** Apply an update against the latest saved state (avoids cross-tab stale overwrites). */
+export function commitState(
+	key: string,
+	fallback: SubathonState,
+	update: (base: SubathonState) => SubathonState
+): SubathonState {
+	const base = loadState(key) ?? fallback;
+	const next = update(base);
+	saveState(key, next);
+	return next;
+}
+
 export function clearState(key: string): void {
 	if (typeof localStorage === 'undefined') return;
 	localStorage.removeItem(storageKey(key));
@@ -106,10 +118,17 @@ export function clearState(key: string): void {
 
 export function getRemaining(state: SubathonState, now: number = Date.now()): number {
 	if (state.paused) {
-		return Math.max(0, Math.round(state.pausedRemaining));
+		return Math.max(0, state.pausedRemaining);
 	}
 
-	return Math.max(0, Math.round((state.endTime - now) / 1000));
+	return Math.max(0, (state.endTime - now) / 1000);
+}
+
+/** Decimal places for the timer when coin rate adds sub-second amounts. */
+export function timerSecondDecimals(secondsPerCoin: number): number {
+	if (secondsPerCoin >= 1) return 0;
+	if (secondsPerCoin >= 0.01) return 2;
+	return 3;
 }
 
 export function getBarStatusColor(state: SubathonState, remainingSeconds: number): string {
@@ -224,7 +243,7 @@ export function setTime(
 	};
 }
 
-/** CC payment fields use hundredths (100 = 1 coin). */
+/** Coin-exchange amounts use hundredths (100 = 1 coin). Effect payments use whole coins. */
 export function ccUnitsToCoins(units: number): number {
 	return units / 100;
 }
@@ -256,18 +275,70 @@ export function addPaidCoins(state: SubathonState, coins: number): SubathonState
 	return addCoinGain(state, coinsToSeconds(coins, state));
 }
 
-export function addCcPaidUnits(state: SubathonState, paidUnits: number): SubathonState {
-	return addPaidCoins(state, ccUnitsToCoins(paidUnits));
-}
+export type CcEffectPayments = {
+	global: { free: number; paid: number };
+	local: { free: number; paid: number };
+};
 
-export function effectPaidUnits(
-	payments: { global: { paid: number }; local: { paid: number } },
+/** Paid coins from an effect-success payload (already whole coins, not hundredths). */
+export function effectPaidCoins(
+	payments: CcEffectPayments,
 	coins: SubathonCoinTracking
 ): number {
 	let total = 0;
-	if (coins.globalPaid) total += payments.global.paid;
-	if (coins.localPaid) total += payments.local.paid;
+	if (coins.globalPaid) total += payments.global?.paid ?? 0;
+	if (coins.localPaid) total += payments.local?.paid ?? 0;
 	return total;
+}
+
+/** @deprecated Use effectPaidCoins — values are whole coins, not hundredths. */
+export const effectPaidUnits = effectPaidCoins;
+
+export function sumEffectPaymentCoins(payments: CcEffectPayments): { free: number; paid: number } {
+	return {
+		free: (payments.global?.free ?? 0) + (payments.local?.free ?? 0),
+		paid: (payments.global?.paid ?? 0) + (payments.local?.paid ?? 0)
+	};
+}
+
+export function effectDisplayName(
+	effect: { name?: string | { public?: string; sort?: string } } | undefined
+): string {
+	if (!effect?.name) return 'Effect';
+	if (typeof effect.name === 'string') return effect.name;
+	return effect.name.public ?? effect.name.sort ?? 'Effect';
+}
+
+function formatCoinCount(coins: number): string {
+	if (Number.isInteger(coins)) return String(coins);
+	return coins.toFixed(2).replace(/\.?0+$/, '');
+}
+
+function formatAddedDuration(seconds: number): string {
+	if (seconds <= 0) return '0 seconds';
+	if (seconds < 1) return `${seconds.toFixed(2)} seconds`;
+	const rounded = Math.round(seconds * 100) / 100;
+	const label = rounded === 1 ? 'second' : 'seconds';
+	return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(2)} ${label}`;
+}
+
+/** Console log for effect-success coin breakdown. */
+export function logEffectSuccess(
+	effectName: string,
+	payments: CcEffectPayments,
+	coins: SubathonCoinTracking,
+	secondsPerCoin: number
+): void {
+	const totals = sumEffectPaymentCoins(payments);
+	const totalCoins = totals.free + totals.paid;
+	const freeCoins = totals.free;
+	const paidCoins = totals.paid;
+	const countedCoins = effectPaidCoins(payments, coins);
+	const addedSeconds = countedCoins * secondsPerCoin;
+
+	console.log(
+		`${effectName} ${formatCoinCount(totalCoins)} coins, ${formatCoinCount(freeCoins)} free, ${formatCoinCount(paidCoins)} paid, added ${formatAddedDuration(addedSeconds)}`
+	);
 }
 
 /** Bits exchange amount is in hundredths; Twitch bits credit ~80% as coins. */
@@ -307,6 +378,7 @@ export function subscribeState(
 	const onLocalSave = (event: Event) => {
 		const detail = (event as CustomEvent<{ key: string; state: SubathonState }>).detail;
 		if (detail?.key !== key) return;
+		lastRaw = localStorage.getItem(storageKey(key));
 		onUpdate(normalizeState(detail.state));
 	};
 

@@ -8,6 +8,7 @@
 	import {
 		clearControlKey,
 		clearState,
+		commitState,
 		createInitialState,
 		getRemaining,
 		initOrLoadState,
@@ -53,10 +54,9 @@
 		}, 1000);
 	}
 
-	function persist(next: SubathonState) {
+	function persist(update: (base: SubathonState) => SubathonState) {
 		if (!key) return;
-		state = next;
-		saveState(key, next);
+		state = commitState(key, state, update);
 	}
 
 	function onExternalUpdate(saved: SubathonState | null) {

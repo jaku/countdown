@@ -14,10 +14,19 @@ function pushPart(parts: DurationPart[], value: number, unit: string, digits?: n
 	parts.push({ value: text, unit });
 }
 
-export function decomposeDuration(totalSeconds: number): DurationPart[] {
-	const total = Math.max(0, Math.round(totalSeconds));
+function formatSecondsValue(seconds: number, decimals: number): string {
+	if (decimals <= 0) return String(Math.floor(seconds)).padStart(2, '0');
+	return seconds.toFixed(decimals);
+}
 
-	let remaining = total;
+export function decomposeDuration(
+	totalSeconds: number,
+	options: { secondDecimals?: number } = {}
+): DurationPart[] {
+	const secondDecimals = options.secondDecimals ?? 0;
+	const total = Math.max(0, totalSeconds);
+
+	let remaining = secondDecimals > 0 ? total : Math.max(0, Math.round(total));
 
 	const years = Math.floor(remaining / YEAR);
 	remaining %= YEAR;
@@ -38,6 +47,7 @@ export function decomposeDuration(totalSeconds: number): DurationPart[] {
 	const seconds = remaining % 60;
 
 	const parts: DurationPart[] = [];
+	const pushSeconds = () => parts.push({ value: formatSecondsValue(seconds, secondDecimals), unit: 's' });
 
 	if (years > 0) {
 		pushPart(parts, years, 'y');
@@ -46,7 +56,7 @@ export function decomposeDuration(totalSeconds: number): DurationPart[] {
 		pushPart(parts, days, 'd', 2);
 		pushPart(parts, hours, 'h', 2);
 		pushPart(parts, minutes, 'm', 2);
-		pushPart(parts, seconds, 's', 2);
+		pushSeconds();
 		return parts;
 	}
 
@@ -56,7 +66,7 @@ export function decomposeDuration(totalSeconds: number): DurationPart[] {
 		pushPart(parts, days, 'd', 2);
 		pushPart(parts, hours, 'h', 2);
 		pushPart(parts, minutes, 'm', 2);
-		pushPart(parts, seconds, 's', 2);
+		pushSeconds();
 		return parts;
 	}
 
@@ -65,7 +75,7 @@ export function decomposeDuration(totalSeconds: number): DurationPart[] {
 		pushPart(parts, days, 'd', 2);
 		pushPart(parts, hours, 'h', 2);
 		pushPart(parts, minutes, 'm', 2);
-		pushPart(parts, seconds, 's', 2);
+		pushSeconds();
 		return parts;
 	}
 
@@ -73,29 +83,32 @@ export function decomposeDuration(totalSeconds: number): DurationPart[] {
 		pushPart(parts, days, 'd');
 		pushPart(parts, hours, 'h', 2);
 		pushPart(parts, minutes, 'm', 2);
-		pushPart(parts, seconds, 's', 2);
+		pushSeconds();
 		return parts;
 	}
 
 	if (hours > 0) {
 		pushPart(parts, hours, 'h');
 		pushPart(parts, minutes, 'm', 2);
-		pushPart(parts, seconds, 's', 2);
+		pushSeconds();
 		return parts;
 	}
 
 	if (minutes > 0) {
 		pushPart(parts, minutes, 'm');
-		pushPart(parts, seconds, 's', 2);
+		pushSeconds();
 		return parts;
 	}
 
-	pushPart(parts, seconds, 's', 2);
+	pushSeconds();
 	return parts;
 }
 
-export function formatDuration(totalSeconds: number): string {
-	return decomposeDuration(totalSeconds)
+export function formatDuration(
+	totalSeconds: number,
+	options: { secondDecimals?: number } = {}
+): string {
+	return decomposeDuration(totalSeconds, options)
 		.map((part) => `${part.value}${part.unit}`)
 		.join(' ');
 }

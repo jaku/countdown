@@ -4,7 +4,14 @@ function plural(count: number, singular: string, pluralForm = `${singular}s`): s
 
 export function formatGainLabel(seconds: number): string {
 	const sign = seconds < 0 ? '−' : '+';
-	const total = Math.max(1, Math.round(Math.abs(seconds)));
+	const abs = Math.abs(seconds);
+
+	if (abs < 1) {
+		const decimals = abs < 0.01 ? 3 : 2;
+		return `${sign}${abs.toFixed(decimals)} s`;
+	}
+
+	const total = Math.round(abs);
 	const hours = Math.floor(total / 3600);
 	const minutes = Math.floor((total % 3600) / 60);
 	const secs = total % 60;

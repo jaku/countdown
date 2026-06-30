@@ -6,6 +6,7 @@
 		adjustTimeWithGain,
 		getRemaining,
 		setTime,
+		timerSecondDecimals,
 		togglePause,
 		type SubathonState
 	} from '$lib/subathon';
@@ -14,7 +15,7 @@
 	export let remaining = 0;
 	export let compact = false;
 
-	const dispatch = createEventDispatcher<{ change: SubathonState }>();
+	const dispatch = createEventDispatcher<{ change: (base: SubathonState) => SubathonState }>();
 
 	let setHours = 0;
 	let setMinutes = 0;
@@ -27,13 +28,13 @@
 	let simulateCoinsInput = '100';
 
 	$: syncFromState(state);
-	$: formatted = formatDuration(remaining);
+	$: formatted = formatDuration(remaining, { secondDecimals: timerSecondDecimals(state.secondsPerCoin) });
 
 	function syncFromState(next: SubathonState) {
 		const total = getRemaining(next);
 		setHours = Math.floor(total / 3600);
 		setMinutes = Math.floor((total % 3600) / 60);
-		setSeconds = total % 60;
+		setSeconds = Math.floor(total % 60);
 		setStartPaused = next.paused;
 		rateInput = next.secondsPerCoin.toString();
 		resetHours = Math.floor(next.defaultDuration / 3600);
@@ -41,27 +42,27 @@
 		resetSeconds = next.defaultDuration % 60;
 	}
 
-	function emit(next: SubathonState) {
-		state = next;
-		dispatch('change', next);
+	function emit(update: (base: SubathonState) => SubathonState) {
+		dispatch('change', update);
 	}
 
 	function applyPauseToggle() {
-		emit(togglePause(state));
+		emit(togglePause);
 	}
 
 	function applySetTime() {
 		const total = parseTimeInput(setHours, setMinutes, setSeconds);
-		emit(setTime(state, total, { startPaused: setStartPaused }));
+		const startPaused = setStartPaused;
+		emit((base) => setTime(base, total, { startPaused }));
 	}
 
 	function applyReset() {
-		emit(setTime(state, state.defaultDuration, { startPaused: false }));
+		emit((base) => setTime(base, base.defaultDuration, { startPaused: false }));
 		resetWarningOpen = false;
 	}
 
 	function applyRemoveTime(seconds: number) {
-		emit(adjustTimeWithGain(state, -seconds));
+		emit((base) => adjustTimeWithGain(base, -seconds));
 	}
 
 	let resetWarningOpen = false;
@@ -79,21 +80,21 @@
 		rateInput = raw;
 		const rate = parseFloat(raw);
 		if (!Number.isFinite(rate) || rate <= 0) return;
-		if (rate === state.secondsPerCoin) return;
-		emit({ ...state, secondsPerCoin: rate });
+		if (Math.abs(rate - state.secondsPerCoin) < 1e-9) return;
+		emit((base) => ({ ...base, secondsPerCoin: rate }));
 	}
 
 	function applyDefaultDuration() {
 		const duration = parseTimeInput(resetHours, resetMinutes, resetSeconds);
-		emit({ ...state, defaultDuration: duration });
+		emit((base) => ({ ...base, defaultDuration: duration }));
 	}
 
 	function applyAddTime(seconds: number) {
-		emit(adjustTimeWithGain(state, seconds));
+		emit((base) => adjustTimeWithGain(base, seconds));
 	}
 
 	function simulatePaidCoins(coins: number) {
-		emit(addPaidCoins(state, coins));
+		emit((base) => addPaidCoins(base, coins));
 	}
 
 	function applySimulateCustom() {
@@ -103,11 +104,11 @@
 	}
 
 	function updateDisplay(patch: Partial<SubathonState['display']>) {
-		emit({ ...state, display: { ...state.display, ...patch } });
+		emit((base) => ({ ...base, display: { ...base.display, ...patch } }));
 	}
 
 	function updateCoins(patch: Partial<SubathonState['coins']>) {
-		emit({ ...state, coins: { ...state.coins, ...patch } });
+		emit((base) => ({ ...base, coins: { ...base.coins, ...patch } }));
 	}
 
 	let bitsWarningOpen = false;
@@ -473,9 +474,12 @@
 		<legend>Coin rate</legend>
 		<label>
 			Seconds added per coin
-			<input type="number" min="0.01" step="0.01" value={rateInput} on:input={setRate} />
+			<input type="number" min="0.001" step="any" value={rateInput} on:input={setRate} />
 		</label>
-		<p class="note">Default is 1 coin = 1 second. A 100-coin effect adds 100 seconds at that rate.</p>
+		<p class="note">
+			Fractional rates are supported (e.g. 0.048). At 0.048 s/coin, a 1-coin effect adds ~0.05 s;
+			a 100-coin effect adds ~4.8 s.
+		</p>
 	</fieldset>
 
 	<fieldset>

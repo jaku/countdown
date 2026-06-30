@@ -3,8 +3,9 @@
 
 	export let remaining = 0;
 	export let compact = false;
+	export let secondDecimals = 0;
 
-	$: parts = decomposeDuration(remaining);
+	$: parts = decomposeDuration(remaining, { secondDecimals });
 </script>
 
 <div
